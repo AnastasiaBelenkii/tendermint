@@ -120,11 +120,11 @@ try to send will not block (returns immediately) if outgoing buffer is full.
 handleMsg(pool):
   while true do
     upon receiving bcBlockRequestMessage m from peer p:
-	  block = load block for height m.Height from pool.store
-	  if block != nil then
-	    try to send BlockResponseMessage(block) to p   
-	  else   
-	    try to send bcNoBlockResponseMessage(m.Height) to p
+      block = load block for height m.Height from pool.store		  
+      if block != nil then       
+        try to send BlockResponseMessage(block) to p 	      
+      else	     
+        try to send bcNoBlockResponseMessage(m.Height) to p	    
 
     upon receiving bcBlockResponseMessage m from peer p:
 	  pool.mtx.Lock()
