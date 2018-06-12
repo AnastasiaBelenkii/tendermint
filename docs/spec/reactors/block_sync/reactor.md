@@ -56,35 +56,49 @@ The Blockchain reactor is organised as a set of concurrent tasks:
 
 ### Data structures
 
+These are the core data structures necessarily to provide the Blockchain Reactor logic.
+
+Requester data structure is used to track assignment of request for `block` at position `height` to a 
+peer with id equals to `peerID`. 
+
 ```go
 type Requester {
- block Block
- mtx Mutex 
- height int64  
-  peerID p2p.ID
- redoChannel     chan struct{}
+  mtx          Mutex		
+  block        Block
+  height       int64  
+   peerID       p2p.ID
+  redoChannel  chan struct{}
 }
+
+Pool is core data structure that stores last executed block (`height`), assignment of requests to peers (`requesters`), 
+current height for each peer and number of pending requests for each peer (`peers`), maximum peer height, etc. 
 
 type Pool {
-    mtx Mutex
-    requestors map[int64]*Requestor
-     height     int64  // the lowest key in requesters.
-    peers map[p2p.ID]*Peer
-     maxPeerHeight int64    // atomic
-     numPending int32 // number of requests pending 
-    store BlockStore
-     requestsChannel chan<- BlockRequest
-     errorsChannel  chan<- peerError
+  mtx Mutex	
+  requesters       map[int64]*Requester
+   height           int64  
+  peers            map[p2p.ID]*Peer
+   maxPeerHeight    int64    
+   numPending       int32   
+  store            BlockStore
+   requestsChannel  chan<- BlockRequest
+   errorsChannel    chan<- peerError
 }
+
+Peer data structure stores for each peer current `height` and number of pending requests sent to 
+the peer (`numPending`), etc.
 
 type Peer struct {
-	id          p2p.ID
-	height     int64
-	numPending int32
-	timeout    *time.Timer
-	didTimeout bool
+  id          p2p.ID	
+  height     int64
+  numPending int32
+  timeout    *time.Timer
+  didTimeout bool
 }
 
+BlockRequest is internal data structure used to denote current mapping of request for a block at some `height` to 
+a peer (`PeerID`).
+	
 type BlockRequest {
 	Height int64
 	PeerID p2p.ID
@@ -93,61 +107,63 @@ type BlockRequest {
 
 ### Receive routine of Blockchain Reactor
 
-It is executed upon message reception on the BlockchainChannel inside p2p receive routine. 
+It is executed upon message reception on the BlockchainChannel inside p2p receive routine. There is a separate p2p 
+receive routine (and therefore receive routine of the Blockchain Reactor) executed for each peer. Note that
+try to send will not block (returns immediately) if outgoing buffer is full.    
 
 ```go
-handleMsg():
-while true do
-  upon receiving bcBlockRequestMessage m from peer p:
-	block = load block for height m.Height from pool.store
-	if block != nil then
-	  try to send BlockResponseMessage(block) to p // try to send will not block (and return immediately) if outgoing buffer is full  
-	else   
-	  try to send bcNoBlockResponseMessage(m.Height) to p
+handleMsg(pool):
+  while true do
+    upon receiving bcBlockRequestMessage m from peer p:
+	  block = load block for height m.Height from pool.store
+	  if block != nil then
+	    try to send BlockResponseMessage(block) to p   
+	  else   
+	    try to send bcNoBlockResponseMessage(m.Height) to p
 
-upon receiving bcBlockResponseMessage m from peer p:
-	pool.mtx.Lock()
-	requester = pool.requesters[m.Height]
-	if requester == nil then
-		error("peer sent us a block we didn't expect")
+    upon receiving bcBlockResponseMessage m from peer p:
+	  pool.mtx.Lock()
+	  requester = pool.requesters[m.Height]
+	  if requester == nil then
+	    error("peer sent us a block we didn't expect")
 		continue
 
-	if requester.block == nil and requester.peerID == p then
+	  if requester.block == nil and requester.peerID == p then
 		requester.block = m
 		pool.numPending -= 1  // atomic decrement
 		peer = pool.peers[p]
 		if peer != nil then
-			peer.numPending--
-			if peer.numPending == 0 then
-				peer.timeout.Stop()
-			else
-				trigger peer timeout to expire after peerTimeout
-	pool.mtx.Unlock()
+		  peer.numPending--
+		  if peer.numPending == 0 then
+		    peer.timeout.Stop()
+		  // NOTE: we don't send Quit signal to the corresponding requester task!
+		  else
+		    trigger peer timeout to expire after peerTimeout
+	  pool.mtx.Unlock()
 		
 		
-upon receiving bcStatusRequestMessage m from peer p:
-	try to send bcStatusResponseMessage(pool.store.Height)
+    upon receiving bcStatusRequestMessage m from peer p:
+	  try to send bcStatusResponseMessage(pool.store.Height)
 
-upon receiving bcStatusResponseMessage m from peer p:
-	pool.mtx.Lock()
-	peer = pool.peers[p]
-	if peer != nil then
-		peer.height = m.height
-	else
-		peer = create new Peer data structure with id = p and height = m.Height
-		pool.peers[p] = peer
+    upon receiving bcStatusResponseMessage m from peer p:
+      pool.mtx.Lock()	
+	  peer = pool.peers[p]
+	  if peer != nil then
+	    peer.height = m.height
+	  else
+	    peer = create new Peer data structure with id = p and height = m.Height
+        pool.peers[p] = peer
 
-	if m.Height > pool.maxPeerHeight then
+      if m.Height > pool.maxPeerHeight then
 		pool.maxPeerHeight = m.Height
     
-	pool.mtx.Unlock()
+	  pool.mtx.Unlock()
 		
 		
 onTimeout(p):
-	send error message to pool error channel
-	peer = pool.peers[p]
-	peer.didTimeout = true
-
+  send error message to pool error channel
+  peer = pool.peers[p]
+  peer.didTimeout = true
 ```
 
 ### Requester tasks
