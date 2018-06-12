@@ -2,8 +2,9 @@ package p2p
 
 import (
 	"fmt"
-	cmn "github.com/tendermint/tmlibs/common"
 	"strings"
+
+	cmn "github.com/tendermint/tmlibs/common"
 )
 
 const (

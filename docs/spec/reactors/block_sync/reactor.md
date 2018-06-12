@@ -69,10 +69,11 @@ type Requester {
    peerID       p2p.ID
   redoChannel  chan struct{}
 }
-
+```
 Pool is core data structure that stores last executed block (`height`), assignment of requests to peers (`requesters`), 
 current height for each peer and number of pending requests for each peer (`peers`), maximum peer height, etc. 
 
+```go
 type Pool {
   mtx Mutex	
   requesters       map[int64]*Requester
@@ -84,10 +85,12 @@ type Pool {
    requestsChannel  chan<- BlockRequest
    errorsChannel    chan<- peerError
 }
+```
 
 Peer data structure stores for each peer current `height` and number of pending requests sent to 
 the peer (`numPending`), etc.
 
+```go
 type Peer struct {
   id          p2p.ID	
   height     int64
@@ -95,10 +98,12 @@ type Peer struct {
   timeout    *time.Timer
   didTimeout bool
 }
+```
 
 BlockRequest is internal data structure used to denote current mapping of request for a block at some `height` to 
 a peer (`PeerID`).
 	
+```go
 type BlockRequest {
 	Height int64
 	PeerID p2p.ID
