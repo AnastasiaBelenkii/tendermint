@@ -43,41 +43,77 @@ type bcStatusResponseMessage struct {
     Height int64
 }
 ```
-NOTE: why we use prefix bc for those messages?
 
-## Protocol
+## Architecture and algorithm
 
-Blockchain reactor consists of several parallel tasks (routines):...
+The Blockchain reactor is organised as a set of concurrent tasks: 
+    - Receive routine of Blockchain Reactor 
+    - Task for creating Requesters
+    - Set of Requesters tasks and 
+    - Controller task.        
 
-### Pool data structure and peer data structure
-TODO
+![Blockchain Reactor Architecture Diagram](img/bc-reactor.png)
+
+### Data structures
+
+```go
+type Requester {
+ block Block
+ mtx Mutex 
+ height int64  
+  peerID p2p.ID
+ redoChannel     chan struct{}
+}
+
+type Pool {
+    mtx Mutex
+    requestors map[int64]*Requestor
+     height     int64  // the lowest key in requesters.
+    peers map[p2p.ID]*Peer
+     maxPeerHeight int64    // atomic
+     numPending int32 // number of requests pending 
+    store BlockStore
+     requestsChannel chan<- BlockRequest
+     errorsChannel  chan<- peerError
+}
+
+type Peer struct {
+	id          p2p.ID
+	height     int64
+	numPending int32
+	timeout    *time.Timer
+	didTimeout bool
+}
+
+type BlockRequest {
+	Height int64
+	PeerID p2p.ID
+}
+```
 
 ### Receive routine of Blockchain Reactor
 
-It is executed upon message reception on the BlockchainChannel channel inside p2p receive routine. 
+It is executed upon message reception on the BlockchainChannel inside p2p receive routine. 
 
 ```go
-upon receiving bcBlockRequestMessage m from peer p:
-	block = load block for height m.Height from data store 
-	// NOTE: loading block is blocking call and not cheap; p2p receive routine is blocked while this code is executed
+handleMsg():
+while true do
+  upon receiving bcBlockRequestMessage m from peer p:
+	block = load block for height m.Height from pool.store
 	if block != nil then
-		try to send BlockResponseMessage(block) on BlockchainChannel to p  
-		// NOTE: we don't track what blocks we have already sent to a peer so faulty peer can aks us old the time for the same block
-		return
-	try to send bcNoBlockResponseMessage(m.Height)
+	  try to send BlockResponseMessage(block) to p // try to send will not block (and return immediately) if outgoing buffer is full  
+	else   
+	  try to send bcNoBlockResponseMessage(m.Height) to p
 
 upon receiving bcBlockResponseMessage m from peer p:
-	// add block to a pool
 	pool.mtx.Lock()
-	// Note that p2p receive routine could be blocked if pool.mtx.Lock is taken at this point!
 	requester = pool.requesters[m.Height]
 	if requester == nil then
 		error("peer sent us a block we didn't expect")
-		return // Note that we ignore block in this case! Does it make sense as block might be valid!
+		continue
 
 	if requester.block == nil and requester.peerID == p then
 		requester.block = m
-		send msg gotBlock to a requestor task over channel
 		pool.numPending -= 1  // atomic decrement
 		peer = pool.peers[p]
 		if peer != nil then
@@ -85,24 +121,20 @@ upon receiving bcBlockResponseMessage m from peer p:
 			if peer.numPending == 0 then
 				peer.timeout.Stop()
 			else
-				update recvMonitor for peer with m.size
 				trigger peer timeout to expire after peerTimeout
-    
 	pool.mtx.Unlock()
 		
 		
 upon receiving bcStatusRequestMessage m from peer p:
-	try to send bcStatusResponseMessage(store.Height)
+	try to send bcStatusResponseMessage(pool.store.Height)
 
 upon receiving bcStatusResponseMessage m from peer p:
 	pool.mtx.Lock()
-	// Note that p2p receive routine could be blocked if pool.mtx.Lock is taken at this point!	
-	peer := pool.peers[peerID]
+	peer = pool.peers[p]
 	if peer != nil then
-		peer.height = height    
-		// NOTE: there are no check if new height is bigger than the previous one. If messages arrived out of order we might actually reset height
+		peer.height = m.height
 	else
-		peer = create new peer tracking data structure with peerID = p and height = m.Height
+		peer = create new Peer data structure with id = p and height = m.Height
 		pool.peers[p] = peer
 
 	if m.Height > pool.maxPeerHeight then
@@ -111,31 +143,33 @@ upon receiving bcStatusResponseMessage m from peer p:
 	pool.mtx.Unlock()
 		
 		
-onTimeout(peer):
+onTimeout(p):
 	send error message to pool error channel
+	peer = pool.peers[p]
 	peer.didTimeout = true
 
 ```
 
-### Requestor taks
+### Requester tasks
 
-Requestor is a task that is responsible for fetching a single block.   
+Requester is a task that is responsible for fetching a single block.   
 
 ```go
 fetchBlock(height, pool):
-    peerID = nil
+while true do    
+	peerID = nil
     block = nil
     peer = pickAvailablePeer(height)
 	peerId = peer.id
 
-	enqueue BlockRequest(height, peerID) to pool.requestsCh
+	enqueue BlockRequest(height, peerID) to pool.requestsChannel
 	while true do
-	  upon receiving Quit message on pool channel or requestor channel do
+	  upon receiving Quit message do
 	  return
 
 	  upon receiving message on redoChannel do
 	    mtx.Lock()
-	    increase number of pending requests in pool
+	    pool.numPending ++
 	    peerID = nil
 	    block = nil
 	    mtx.UnLock()
@@ -147,9 +181,9 @@ pickAvailablePeer(height):
 	  pool.mtx.Lock()
 		for each peer in pool.peers do
 		  if !peer.didTimeout and peer.numPending < maxPendingRequestsPerPeer and peer.height >= height then
-		    increase number of pending requests for peer
-		     selectedPeer = peer
-		     break for
+		    peer.numPending++
+		    selectedPeer = peer
+		    break 
 
 		pool.mtx.Unlock()
 		if selectedPeer = nil then
@@ -160,42 +194,44 @@ pickAvailablePeer(height):
 
 ### Task for creating Requestors
 
-This task is responsible for continuously creating Requestors.
+This task is responsible for continuously creating Requester.
 ```go
-creteRequestors(pool, p):
-    if pool.numPending >= maxPendingRequests or size(pool.requesters) >= maxTotalRequesters then
+creteRequestors(pool):
+while true do     
+	if pool.numPending >= maxPendingRequests or size(pool.requesters) >= maxTotalRequesters then
         sleep for requestIntervalMS
         pool.mtx.Lock()
-                for each peer in pool.peers do
-                    if !peer.didTimeout && peer.numPending > 0 && peer.curRate < minRecvRate then
-                        send error on pool error channel
-                        peer.didTimeout = true
+          for each peer in pool.peers do
+            if !peer.didTimeout && peer.numPending > 0 && peer.curRate < minRecvRate then
+              send error on pool error channel
+              peer.didTimeout = true
     
-                    if peer.didTimeout then
-                        for each requester in pool.requesters do
-                        if requester.getPeerID() == p then
-                            requester.redo()
+              if peer.didTimeout then
+                for each requester in pool.requesters do
+                  if requester.getPeerID() == p then
+                    requester.redo()
     
-                        delete(pool.peers, peerID)
+                delete(pool.peers, peerID)
     
                 pool.mtx.Unlock()
             else
-                pool.mtx.Lock()
-                nextHeight = pool.height + size(pool.requesters)
-                requestor = create new requestor for height nextHeight
+              pool.mtx.Lock()
+              nextHeight = pool.height + size(pool.requesters)
+              requester = create new requester for height nextHeight
     
-                pool.requesters[nextHeight] = requestor
-                pool.numPending += 1 // atomic increment
-                start requestor task
-                pool.mtx.Unlock()
+              pool.requesters[nextHeight] = requester
+              pool.numPending += 1 // atomic increment
+              start requester task
+              pool.mtx.Unlock()
 ```
   
 
-### Main blockchain controllor task 
+### Main blockchain reactor controller task 
 ```go
-main:
-	upon receiving request(Height, Peer) on requestsChannel:
-		try to send bcBlockRequestMessage(request.Height) to request.Peer
+main(pool):
+while true do	
+	upon receiving BlockRequest(Height, Peer) on pool.requestsChannel:
+		try to send bcBlockRequestMessage(Height) to Peer
 
 	upon receiving error(peer) on errorsChannel:
 		stop peer for error
@@ -205,7 +241,6 @@ main:
 
 	upon receiving message on switchToConsensusTickerChannel:
 		pool.mtx.Lock()
-		// some conditions to determine if we're caught up
 		receivedBlockOrTimedOut = pool.height > 0 || (time.Now() - pool.startTime) > 5 Second
 		ourChainIsLongestAmongPeers = pool.maxPeerHeight == 0 || pool.height >= pool.maxPeerHeight
 		haveSomePeers = size of pool.peers > 0
@@ -216,18 +251,19 @@ main:
 
 	upon receiving message on trySyncTickerChannel:
 		for i = 0; i < 10; i++ do
-				firstBlock = get block for pool.height
-				secondBlock = get block for pool.height + 1
-				verify firstBlock using LastCommit from secondBlock
-				if verification failed
-					pool.mtx.Lock()
-					peerID = pool.requesters[pool.height].peerID
-					for each requester in pool.requesters do
-						if requester.getPeerID() == peerID
-							enqueue msg on redoChannel for requester
-
-					delete(pool.peers, peerID)
-					stop peer peerID for error
+			pool.mtx.Lock()	
+		    firstBlock = pool.requesters[pool.height].block
+		    secondBlock = pool.requesters[pool.height].block
+		    pool.mtx.Unlock()
+		    verify firstBlock using LastCommit from secondBlock
+		    if verification failed
+		        pool.mtx.Lock()
+		        peerID = pool.requesters[pool.height].peerID
+		        for each requester in pool.requesters do
+		            if requester.getPeerID() == peerID
+		                enqueue msg on redoChannel for requester
+                    delete(pool.peers, peerID)
+		            stop peer peerID for error
 					pool.mtx.Unlock()
 				else
 					delete(pool.requesters, pool.height)
@@ -236,8 +272,6 @@ main:
 					execute firstBlock
 					blocksSynced++
 ```
-
- 
                 
 ## Channels
 
