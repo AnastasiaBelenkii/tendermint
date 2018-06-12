@@ -190,7 +190,7 @@ fetchBlock(height, pool):
 	  upon receiving message on redoChannel do  
 	    mtx.Lock()  
 	    pool.numPending++  
-        redo = true	      
+        redo = true	              
 	    mtx.UnLock()  
 
 pickAvailablePeer(height):
