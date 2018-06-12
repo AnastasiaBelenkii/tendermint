@@ -216,7 +216,8 @@ sleep for requestIntervalMS
 This task is responsible for continuously creating and starting Requester tasks.
 ```go
 creteRequestors(pool):
-  while true do
+  while true do	
+    if !pool.isRunning then break  
     if pool.numPending < maxPendingRequests or size(pool.requesters) < maxTotalRequesters then  
       pool.mtx.Lock()
       nextHeight = pool.height + size(pool.requesters)
@@ -244,48 +245,52 @@ creteRequestors(pool):
 ### Main blockchain reactor controller task 
 ```go
 main(pool):
-while true do	
-	upon receiving BlockRequest(Height, Peer) on pool.requestsChannel:
-		try to send bcBlockRequestMessage(Height) to Peer
+  create trySyncTicker with interval trySyncIntervalMS 
+  create statusUpdateTicker with interval statusUpdateIntervalSeconds   	
+  create switchToConsensusTicker with interbal switchToConsensusIntervalSeconds   	
+  
+  while true do	
+    select {  		
+	  upon receiving BlockRequest(Height, Peer) on pool.requestsChannel:
+	    try to send bcBlockRequestMessage(Height) to Peer	
 
-	upon receiving error(peer) on errorsChannel:
-		stop peer for error
+	  upon receiving error(peer) on errorsChannel:
+	    stop peer for error	
 
-	upon receiving message on statusUpdateTickerChannel:
-		broadcast bcStatusRequestMessage(bcR.store.Height) // message sent in a separate routine
+	  upon receiving message on statusUpdateTickerChannel:
+	    broadcast bcStatusRequestMessage(bcR.store.Height) // message sent in a separate routine	
 
-	upon receiving message on switchToConsensusTickerChannel:
-		pool.mtx.Lock()
-		receivedBlockOrTimedOut = pool.height > 0 || (time.Now() - pool.startTime) > 5 Second
-		ourChainIsLongestAmongPeers = pool.maxPeerHeight == 0 || pool.height >= pool.maxPeerHeight
-		haveSomePeers = size of pool.peers > 0
-		pool.mtx.Unlock()
-
-		if haveSomePeers && receivedBlockOrTimedOut && ourChainIsLongestAmongPeers then
-			switch to consensus mode
-
-	upon receiving message on trySyncTickerChannel:
-		for i = 0; i < 10; i++ do
-			pool.mtx.Lock()	
-		    firstBlock = pool.requesters[pool.height].block
-		    secondBlock = pool.requesters[pool.height].block
-		    pool.mtx.Unlock()
-		    verify firstBlock using LastCommit from secondBlock
-		    if verification failed
-		        pool.mtx.Lock()
-		        peerID = pool.requesters[pool.height].peerID
-		        for each requester in pool.requesters do
-		            if requester.getPeerID() == peerID
-		                enqueue msg on redoChannel for requester
-                    delete(pool.peers, peerID)
-		            stop peer peerID for error
-					pool.mtx.Unlock()
-				else
-					delete(pool.requesters, pool.height)
-					pool.height++
-					save firstBlock to store
-					execute firstBlock
-					blocksSynced++
+	  upon receiving message on switchToConsensusTickerChannel:
+	    pool.mtx.Lock()	
+	    receivedBlockOrTimedOut = pool.height > 0 || (time.Now() - pool.startTime) > 5 Seconds	
+	    ourChainIsLongestAmongPeers = pool.maxPeerHeight == 0 || pool.height >= pool.maxPeerHeight	
+	    haveSomePeers = size of pool.peers > 0	
+	    pool.mtx.Unlock()	
+        if haveSomePeers && receivedBlockOrTimedOut && ourChainIsLongestAmongPeers then
+          switch to consensus mode		
+			
+      upon receiving message on trySyncTickerChannel:
+        for i = 0; i < 10; i++ do	
+		  pool.mtx.Lock()
+		  firstBlock = pool.requesters[pool.height].block		
+		  secondBlock = pool.requesters[pool.height].block    
+		  if firstBlock == nil or secondBlock == nil then continue  
+		  pool.mtx.Unlock()  
+		  verify firstBlock using LastCommit from secondBlock  
+		  if verification failed  
+		    pool.mtx.Lock()  
+		    peerID = pool.requesters[pool.height].peerID    
+		    for each requester in pool.requesters do      
+		      if requester.getPeerID() == peerID    
+		        enqueue msg on redoChannel for requester      
+		        delete(pool.peers, peerID)        
+                stop peer peerID for error    
+		        pool.mtx.Unlock()    
+	      else			  	
+	        delete(pool.requesters, pool.height)
+		    pool.height++  		
+		    save firstBlock to store   			
+		    execute firstBlock			
 ```
                 
 ## Channels
