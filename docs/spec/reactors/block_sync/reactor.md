@@ -160,7 +160,7 @@ handleMsg(pool):
         pool.peers[p] = peer  
 
       if m.Height > pool.maxPeerHeight then       
-	    pool.maxPeerHeight = m.Height	
+        pool.maxPeerHeight = m.Height		    
       pool.mtx.Unlock()    
 	    
 onTimeout(p):
@@ -171,47 +171,45 @@ onTimeout(p):
 
 ### Requester tasks
 
-Requester is a task that is responsible for fetching a single block.   
+Requester task is responsible for fetching a single block at position `height`.   
 
 ```go
 fetchBlock(height, pool):
-while true do    
-	peerID = nil
+  while true do    
+    peerID = nil	
     block = nil
-    peer = pickAvailablePeer(height)
-	peerId = peer.id
+    peer = pickAvailablePeer(height)    
+    peerId = peer.id	
 
-	enqueue BlockRequest(height, peerID) to pool.requestsChannel
-	while true do
-	  upon receiving Quit message do
-	  return
+    enqueue BlockRequest(height, peerID) to pool.requestsChannel	
+    while true do	
+	  upon receiving Quit message do  
+	  return  
 
-	  upon receiving message on redoChannel do
-	    mtx.Lock()
-	    pool.numPending ++
-	    peerID = nil
-	    block = nil
-	    mtx.UnLock()
+	  upon receiving message on redoChannel do  
+	    mtx.Lock()  
+	    pool.numPending++  
+	    peerID = nil  
+	    block = nil  
+	    mtx.UnLock()  
 
 pickAvailablePeer(height):
-	selectedPeer = nil
+  selectedPeer = nil	
+  while selectedPeer = nil do	
+    pool.mtx.Lock()	  
+    for each peer in pool.peers do 		
+      if !peer.didTimeout and peer.numPending < maxPendingRequestsPerPeer and peer.height >= height then		  
+        peer.numPending++		    
+        selectedPeer = peer		    
+        break 
+      pool.mtx.Unlock()         	
+      if selectedPeer = nil then  		
+        sleep requestIntervalMS			
 
-	while selectedPeer = nil do
-	  pool.mtx.Lock()
-		for each peer in pool.peers do
-		  if !peer.didTimeout and peer.numPending < maxPendingRequestsPerPeer and peer.height >= height then
-		    peer.numPending++
-		    selectedPeer = peer
-		    break 
-
-		pool.mtx.Unlock()
-		if selectedPeer = nil then
-			sleep requestIntervalMS
-
-	return selectedPeer
+  return selectedPeer 	
 ```
 
-### Task for creating Requestors
+### Task for creating Requesters
 
 This task is responsible for continuously creating Requester.
 ```go
