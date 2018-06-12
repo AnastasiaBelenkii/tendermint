@@ -181,16 +181,16 @@ fetchBlock(height, pool):
     peer = pickAvailablePeer(height)    
     peerId = peer.id	
 
-    enqueue BlockRequest(height, peerID) to pool.requestsChannel	
-    while true do	
+    enqueue BlockRequest(height, peerID) to pool.requestsChannel
+    redo = false    
+    while !redo do	
 	  upon receiving Quit message do  
 	    return  
 
 	  upon receiving message on redoChannel do  
 	    mtx.Lock()  
 	    pool.numPending++  
-	    peerID = nil  
-	    block = nil  
+        redo = true	      
 	    mtx.UnLock()  
 
 pickAvailablePeer(height):
