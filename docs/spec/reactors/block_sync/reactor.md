@@ -105,8 +105,8 @@ a peer (`PeerID`).
 	
 ```go
 type BlockRequest {
-	Height int64
-	PeerID p2p.ID
+  Height int64
+  PeerID p2p.ID  
 }
 ```
 
@@ -131,20 +131,20 @@ handleMsg(pool):
 	  requester = pool.requesters[m.Height]
 	  if requester == nil then
 	    error("peer sent us a block we didn't expect")
-		continue
+        continue		
 
 	  if requester.block == nil and requester.peerID == p then
-		requester.block = m
-		pool.numPending -= 1  // atomic decrement
-		peer = pool.peers[p]
-		if peer != nil then
-		  peer.numPending--
-		  if peer.numPending == 0 then
-		    peer.timeout.Stop()
-		  // NOTE: we don't send Quit signal to the corresponding requester task!
-		  else
-		    trigger peer timeout to expire after peerTimeout
-	  pool.mtx.Unlock()
+        requester.block = m
+        pool.numPending -= 1  // atomic decrement 
+        peer = pool.peers[p]                
+        if peer != nil then        		
+        peer.numPending--        		  
+        if peer.numPending == 0 then        		  
+          peer.timeout.Stop()
+          // NOTE: we don't send Quit signal to the corresponding requester task!        
+        else         		  
+          trigger peer timeout to expire after peerTimeout
+      pool.mtx.Unlock()  	  
 		
 		
     upon receiving bcStatusRequestMessage m from peer p:
