@@ -92,7 +92,7 @@ the peer (`numPending`), etc.
 
 ```go
 type Peer struct {
-  id          p2p.ID	
+  id         p2p.ID	
   height     int64
   numPending int32
   timeout    *time.Timer
@@ -126,25 +126,25 @@ handleMsg(pool):
       else	     
         try to send bcNoBlockResponseMessage(m.Height) to p	    
 
-    upon receiving bcBlockResponseMessage m from peer p:
-	  pool.mtx.Lock()
+    upon receiving bcBlockResponseMessage m from peer p:    
+      pool.mtx.Lock()	  
 	  requester = pool.requesters[m.Height]
-	  if requester == nil then
-	    error("peer sent us a block we didn't expect")
-        continue		
+      if requester == nil then	  
+        error("peer sent us a block we didn't expect")	    
+        continue        		
 
-	  if requester.block == nil and requester.peerID == p then
+      if requester.block == nil and requester.peerID == p then	  
         requester.block = m
-        pool.numPending -= 1  // atomic decrement 
-        peer = pool.peers[p]                
-        if peer != nil then        		
-        peer.numPending--        		  
-        if peer.numPending == 0 then        		  
-          peer.timeout.Stop()
-          // NOTE: we don't send Quit signal to the corresponding requester task!        
-        else         		  
-          trigger peer timeout to expire after peerTimeout
-      pool.mtx.Unlock()  	  
+        pool.numPending -= 1  // atomic decrement         
+        peer = pool.peers[p]                        
+        if peer != nil then                		
+          peer.numPending--                		  
+            if peer.numPending == 0 then                		  
+              peer.timeout.Stop()          
+              // NOTE: we don't send Quit signal to the corresponding requester task!                  
+        else                 		  
+          trigger peer timeout to expire after peerTimeout          
+      pool.mtx.Unlock()          	  
 		
 		
     upon receiving bcStatusRequestMessage m from peer p:
