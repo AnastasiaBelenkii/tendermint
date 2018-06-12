@@ -128,7 +128,7 @@ handleMsg(pool):
 
     upon receiving bcBlockResponseMessage m from peer p:    
       pool.mtx.Lock()	  
-	  requester = pool.requesters[m.Height]
+      requester = pool.requesters[m.Height]	  
       if requester == nil then	  
         error("peer sent us a block we didn't expect")	    
         continue        		
@@ -139,9 +139,9 @@ handleMsg(pool):
         peer = pool.peers[p]                        
         if peer != nil then                		
           peer.numPending--                		  
-            if peer.numPending == 0 then                		  
-              peer.timeout.Stop()          
-              // NOTE: we don't send Quit signal to the corresponding requester task!                  
+          if peer.numPending == 0 then                		  
+            peer.timeout.Stop()          
+            // NOTE: we don't send Quit signal to the corresponding requester task!                  
         else                 		  
           trigger peer timeout to expire after peerTimeout          
       pool.mtx.Unlock()          	  
