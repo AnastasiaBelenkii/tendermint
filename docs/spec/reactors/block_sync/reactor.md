@@ -148,27 +148,25 @@ handleMsg(pool):
 		
 		
     upon receiving bcStatusRequestMessage m from peer p:
-	  try to send bcStatusResponseMessage(pool.store.Height)
+      try to send bcStatusResponseMessage(pool.store.Height)    	
 
     upon receiving bcStatusResponseMessage m from peer p:
-      pool.mtx.Lock()	
-	  peer = pool.peers[p]
-	  if peer != nil then
-	    peer.height = m.height
-	  else
-	    peer = create new Peer data structure with id = p and height = m.Height
-        pool.peers[p] = peer
+      pool.mtx.Lock()		
+      peer = pool.peers[p]	  
+      if peer != nil then	  
+        peer.height = m.height	    
+      else	  
+        peer = create new Peer data structure with id = p and height = m.Height	    
+        pool.peers[p] = peer  
 
-      if m.Height > pool.maxPeerHeight then
-		pool.maxPeerHeight = m.Height
-    
-	  pool.mtx.Unlock()
-		
-		
+      if m.Height > pool.maxPeerHeight then       
+	    pool.maxPeerHeight = m.Height	
+      pool.mtx.Unlock()    
+	    
 onTimeout(p):
-  send error message to pool error channel
-  peer = pool.peers[p]
-  peer.didTimeout = true
+  send error message to pool error channel  
+  peer = pool.peers[p]  
+  peer.didTimeout = true  
 ```
 
 ### Requester tasks
