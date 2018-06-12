@@ -117,16 +117,55 @@ onTimeout(peer):
 
 ```
 
+### Requestor taks
+
+Requestor is a task that is responsible for fetching a single block.   
+
+```go
+fetchBlock(height, pool):
+    peerID = nil
+    block = nil
+    peer = pickAvailablePeer(height)
+	peerId = peer.id
+
+	enqueue BlockRequest(height, peerID) to pool.requestsCh
+	while true do
+	  upon receiving Quit message on pool channel or requestor channel do
+	  return
+
+	  upon receiving message on redoChannel do
+	    mtx.Lock()
+	    increase number of pending requests in pool
+	    peerID = nil
+	    block = nil
+	    mtx.UnLock()
+
+pickAvailablePeer(height):
+	selectedPeer = nil
+
+	while selectedPeer = nil do
+	  pool.mtx.Lock()
+		for each peer in pool.peers do
+		  if !peer.didTimeout and peer.numPending < maxPendingRequestsPerPeer and peer.height >= height then
+		    increase number of pending requests for peer
+		     selectedPeer = peer
+		     break for
+
+		pool.mtx.Unlock()
+		if selectedPeer = nil then
+			sleep requestIntervalMS
+
+	return selectedPeer
+```
+
 ### Task for creating Requestors
 
-This task is responsible for continously creating Requestors where each Requestor is a task that is 
-responsible for fetching a single block.   
-
+This task is responsible for continously creating Requestors.
 ```go
 creteRequestors(pool, p):
     if pool.numPending >= maxPendingRequests or size(pool.requesters) >= maxTotalRequesters then
-                sleep for requestIntervalMS
-                pool.mtx.Lock()
+        sleep for requestIntervalMS
+        pool.mtx.Lock()
                 for each peer in pool.peers do
                     if !peer.didTimeout && peer.numPending > 0 && peer.curRate < minRecvRate then
                         send error on pool error channel
@@ -151,6 +190,7 @@ creteRequestors(pool, p):
                 pool.mtx.Unlock()
 ```
   
+
 ### Main blockchain controllor task 
 
  
