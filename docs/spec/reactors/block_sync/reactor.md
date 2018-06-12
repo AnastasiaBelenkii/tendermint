@@ -217,26 +217,27 @@ This task is responsible for continuously creating and starting Requester tasks.
 ```go
 creteRequestors(pool):
   while true do
-    if pool.numPending >= maxPendingRequests or size(pool.requesters) >= maxTotalRequesters then  
-      pool.mtx.Lock()    
-      for each peer in pool.peers do
-        if !peer.didTimeout && peer.numPending > 0 && peer.curRate < minRecvRate then      
-          send error on pool error channel
-          peer.didTimeout = true          
-          if peer.didTimeout then
-            for each requester in pool.requesters do              
-              if requester.getPeerID() == peer then                 
-                requester.redo()
-            delete(pool.peers, peerID)                
-          pool.mtx.Unlock()    
-        else          
-          pool.mtx.Lock()
-          nextHeight = pool.height + size(pool.requesters)          
-          requester = create new requester for height nextHeight               
-          pool.requesters[nextHeight] = requester    
-          pool.numPending += 1 // atomic increment    
-          start requester task              
-          pool.mtx.Unlock()                                          
+    if pool.numPending < maxPendingRequests or size(pool.requesters) < maxTotalRequesters then  
+      pool.mtx.Lock()
+      nextHeight = pool.height + size(pool.requesters)
+      requester = create new requester for height nextHeight                     
+      pool.requesters[nextHeight] = requester                    
+      pool.numPending += 1 // atomic increment                    
+      start requester task                              
+      pool.mtx.Unlock()                           
+    else     
+      sleep requestIntervalMS
+      pool.mtx.Lock()           
+      for each peer in pool.peers do      
+        if !peer.didTimeout && peer.numPending > 0 && peer.curRate < minRecvRate then              
+          send error on pool error channel          
+          peer.didTimeout = true
+        if peer.didTimeout then  
+          for each requester in pool.requesters do                  
+            if requester.getPeerID() == peer then                     
+              enqueue msg on requestor's redoChannel
+          delete(pool.peers, peerID)                  
+      pool.mtx.Unlock()        
 ```
   
 
