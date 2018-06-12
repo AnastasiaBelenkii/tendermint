@@ -117,8 +117,7 @@ receive routine (and therefore receive routine of the Blockchain Reactor) execut
 try to send will not block (returns immediately) if outgoing buffer is full.    
 
 ```go
-handleMsg(pool):
-  while true do
+handleMsg(pool, m):
     upon receiving bcBlockRequestMessage m from peer p:
       block = load block for height m.Height from pool.store		  
       if block != nil then       
@@ -211,38 +210,33 @@ pickAvailablePeer(height):
 
   return selectedPeer 	
 ```
-
+sleep for requestIntervalMS
 ### Task for creating Requesters
 
-This task is responsible for continuously creating Requester.
+This task is responsible for continuously creating and starting Requester tasks.
 ```go
 creteRequestors(pool):
-while true do     
-	if pool.numPending >= maxPendingRequests or size(pool.requesters) >= maxTotalRequesters then
-        sleep for requestIntervalMS
-        pool.mtx.Lock()
-          for each peer in pool.peers do
-            if !peer.didTimeout && peer.numPending > 0 && peer.curRate < minRecvRate then
-              send error on pool error channel
-              peer.didTimeout = true
-    
-              if peer.didTimeout then
-                for each requester in pool.requesters do
-                  if requester.getPeerID() == p then
-                    requester.redo()
-    
-                delete(pool.peers, peerID)
-    
-                pool.mtx.Unlock()
-            else
-              pool.mtx.Lock()
-              nextHeight = pool.height + size(pool.requesters)
-              requester = create new requester for height nextHeight
-    
-              pool.requesters[nextHeight] = requester
-              pool.numPending += 1 // atomic increment
-              start requester task
-              pool.mtx.Unlock()
+  while true do
+    if pool.numPending >= maxPendingRequests or size(pool.requesters) >= maxTotalRequesters then  
+      pool.mtx.Lock()    
+      for each peer in pool.peers do
+        if !peer.didTimeout && peer.numPending > 0 && peer.curRate < minRecvRate then      
+          send error on pool error channel
+          peer.didTimeout = true          
+          if peer.didTimeout then
+            for each requester in pool.requesters do              
+              if requester.getPeerID() == peer then                 
+                requester.redo()
+            delete(pool.peers, peerID)                
+          pool.mtx.Unlock()    
+        else          
+          pool.mtx.Lock()
+          nextHeight = pool.height + size(pool.requesters)          
+          requester = create new requester for height nextHeight               
+          pool.requesters[nextHeight] = requester    
+          pool.numPending += 1 // atomic increment    
+          start requester task              
+          pool.mtx.Unlock()                                          
 ```
   
 
